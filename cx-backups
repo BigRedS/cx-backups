@@ -1,0 +1,164 @@
+#! /usr/bin/env python3
+
+# A quick and dirty python script for backing up Coralogix alerts and dashboards, optionally
+# into a git repo.
+
+# Avi 2025-07-22
+
+import os
+import shutil
+import subprocess
+import json
+import logging
+import datetime
+
+api_key = os.environ['CX_API_KEY']
+region = os.environ['CX_REGION']
+
+if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
+  git_repo_url = os.environ['CX_BACKUPS_GIT_REPO_URL']
+
+if 'CX_BACKUPS_WORKDIR' in os.environ:
+  workdir = os.environ['CX_BACKUPS_WORKDIR']
+elif 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
+  workdir = '/tmp/cx-backups/'
+else:
+  workdir = './cx-backups.d/'
+
+if 'CX_BACKUPS_GIT_COMMIT_MESSAGE' in os.environ:
+  git_commit_message = os.environ['CX_BACKUPS_GIT_COMMIT_MESSAGE']
+else:
+  git_commit_message = 'cx-backups ' + datetime.datetime.now().isoformat()
+
+save_dirs = {
+  'dashboards':  './dashboards/',
+  'alerts': './alerts/'
+}
+
+grpc_endpoints = {
+  "AP1": "ng-api-grpc.coralogix.in:443",
+  "AP2": "ng-api-grpc.coralogixsg.com:443",
+  "AP3": "ng-api-grpc.ap3.coralogix.com:443",
+  "EU1": "ng-api-grpc.coralogix.com:443",
+  "EU2": "ng-api-grpc.eu2.coralogix.com:443",
+  "US1": "ng-api-grpc.coralogix.us:443",
+  "US2": "ng-api-grpc.cx498.coralogix.com:443",
+}
+
+grpc_endpoint = grpc_endpoints[region]
+
+write_files = 1
+
+logging.basicConfig(encoding='utf-8', level=logging.INFO)
+if 'LOGLEVEL' in os.environ:
+  logging.getLogger().setLevel(os.environ['LOGLEVEL'])
+
+def main():
+  if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
+
+    logging.info(f"git cloning '{git_repo_url}' into '{workdir}'")
+    git_clone()
+
+  if not os.path.exists(workdir):
+    os.makedirs(workdir)
+  os.chdir(workdir)
+
+  alerts_defs = get_alerts_definitions();
+  for alertdef in alerts_defs['alertDefs']:
+    alert = get_and_save_alert(alertdef['id'])
+    filename = alertdef['id'] + '::' + alertdef['alertDefProperties']['name'] + '.json'
+    filename = filename.replace(' ', '_')
+    write_json_to_file(alert, 'alerts', filename)
+
+  db_catalog = get_dashboard_catalog();
+  for dashboard_id in db_catalog:
+    board = get_and_save_dashboard(dashboard_id)
+    filename = board["dashboard"]["id"] + '::' + board["dashboard"]["name"] + '.json'
+    filename = filename.replace(' ', '_')
+    write_json_to_file(board, 'dashboards', filename)
+
+  if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
+    git_commit_push()
+
+def get_and_save_alert(id):
+  payload = ({"id": id})
+  alert = grpcurl('com.coralogixapis.alerts.v3.AlertDefsService/GetAlertDef', payload)
+  return alert
+
+def get_alerts_definitions():
+  definitions = grpcurl("com.coralogixapis.alerts.v3.AlertDefsService/ListAlertDefs")
+  write_json_to_file(definitions, 'alerts', 'definitions.json')
+  return(definitions)
+
+def get_and_save_dashboard(id):
+  payload = ({"dashboard_id": id})
+  board = grpcurl("com.coralogixapis.dashboards.v1.services.DashboardsService/GetDashboard", payload)
+  return board
+
+def get_dashboard_catalog():
+  catalog = grpcurl("com.coralogixapis.dashboards.v1.services.DashboardCatalogService/GetDashboardCatalog")
+  write_json_to_file(catalog, 'dashboards', 'catalog.json')
+  boards = {}
+  for item in catalog["items"]:
+    boards[ item['id'] ] = item['name']
+  return boards
+
+def grpcurl(location, data = ()):
+
+  command = [
+    'grpcurl',
+    '-H', f"Authorization: Bearer {api_key}",
+  ]
+  if ( len(data) > 0 ):
+    command.append('-d')
+    command.append(json.dumps(data))
+  command.append(grpc_endpoint)
+  command.append(location)
+
+  logging.debug("command:")
+  logging.debug(' '.join(command))
+
+  try:
+    result = subprocess.run(command, capture_output=True, encoding="utf-8")
+    #TODO catch 403s etc. here
+    if len(result.stdout) == 0:
+      logging.error(f"Got an empty result from '{grpc_endpoint}' '{location}'; aborting script")
+      exit(254)
+    logging.debug(f"grpcurl got {len(result.stdout)} bytes from '{grpc_endpoint}' '{location}'")
+    return json.loads(result.stdout)
+
+  except subprocess.CalledProcessError as err:
+    logging.error(f"Error grpcurling '{grpc_endpoint}' '{location}': {err.stderr}")
+    exit(255)
+
+def write_json_to_file(data, type, filename, subdir=''):
+
+  if write_files == 0:
+    return
+  if len(subdir) > 0:
+    dirpath = save_dirs[type] + '/' + subdir
+  else:
+    dirpath = save_dirs[type]
+
+  if not os.path.exists(dirpath):
+    os.makedirs(dirpath)
+
+  filepath = dirpath + '/' + filename
+
+  with open(filepath, 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+# Git shennanigans
+# TODO: Any error handling at all would be nice!
+
+def git_clone():
+  if os.path.exists(workdir):
+    shutil.rmtree(workdir)
+  subprocess.run(['git', 'clone', git_repo_url, workdir])
+
+def git_commit_push():
+  subprocess.run(['git', 'add', '.'])
+  subprocess.run(['git', 'commit', '-a', '-m', git_commit_message ])
+  subprocess.run(['git', 'push'])
+
+main()
