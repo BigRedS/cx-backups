@@ -145,7 +145,11 @@ def get_dashboard_catalog():
 # E2M
 def get_e2ms():
   list = api_request('/mgmt/openapi/api/v2/events2metrics')
-  write_json_to_file(list, 'events2metrics', 'list.json')
+  if 'e2m' in list:
+    for e2m in list['e2m']:
+      filename = '::'.join([str(e2m['id']), e2m['name']])
+      filename = filename + '.json'
+      write_json_to_file(list, 'events2metrics', filename)
   print(json.dumps(list, indent=2))
 
 
@@ -161,7 +165,11 @@ def api_request(path, data = ()):
 
 def get_parsing_rule_groups():
   rule_groups = api_request('/mgmt/openapi/api/v1/rulegroups');
-  write_json_to_file(rule_groups, 'parsing-rules', 'groups.json')
+  if 'ruleGroups' in rule_groups:
+    for rule_group in rule_groups['ruleGroups']:
+      filename = '::'.join([str(rule_group['order']), rule_group['id'], rule_group['name']])
+      filename = filename + '.json'
+      write_json_to_file(rule_groups, 'parsing-rules', filename )
   return(rule_groups);
 
 
