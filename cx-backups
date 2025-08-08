@@ -49,7 +49,8 @@ else:
 
 save_dirs = {
   'dashboards':  './dashboards/',
-  'alerts': './alerts/'
+  'alerts': './alerts/',
+  'events2metrics': './events2metrics'
 }
 
 grpc_endpoints = {
@@ -84,6 +85,10 @@ def main():
   if not os.path.exists(workdir):
     os.makedirs(workdir)
   os.chdir(workdir)
+
+  # I don't yet have anything useful to do with the list of e2ms, and since the get_* functions
+  # do the writing to disk themselves, this just sits here on its own.
+  get_e2ms()
 
   alerts_defs = get_alerts_definitions();
   if 'alertDefs' in alerts_defs:
@@ -130,6 +135,12 @@ def get_dashboard_catalog():
   for item in catalog["items"]:
     boards[ item['id'] ] = item['name']
   return boards
+
+# E2M
+def get_e2ms():
+  list = api_request('/mgmt/openapi/api/v2/events2metrics')
+  write_json_to_file(list, 'events2metrics', 'list.json')
+  print(json.dumps(list, indent=2))
 
 
 def api_request(path, data = ()):
