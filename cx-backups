@@ -50,7 +50,8 @@ else:
 save_dirs = {
   'dashboards':  './dashboards/',
   'alerts': './alerts/',
-  'events2metrics': './events2metrics'
+  'events2metrics': './events2metrics/',
+  'parsing-rules': './parsing-rules/'
 }
 
 grpc_endpoints = {
@@ -86,9 +87,12 @@ def main():
     os.makedirs(workdir)
   os.chdir(workdir)
 
-  # I don't yet have anything useful to do with the list of e2ms, and since the get_* functions
-  # do the writing to disk themselves, this just sits here on its own.
+
+  # I don't yet have anything useful to do with the list of e2ms or parsing rules, and since the
+  # get_* functions do the writing to disk themselves, these just sit there on their own.
   get_e2ms()
+  get_parsing_rule_groups()
+
 
   alerts_defs = get_alerts_definitions();
   if 'alertDefs' in alerts_defs:
@@ -106,12 +110,14 @@ def main():
   for dashboard_id in db_catalog:
     board = get_dashboard(dashboard_id)
     filename = board["dashboard"]["id"] + '::' + board["dashboard"]["name"] + '.json'
-    filename = filename.replace(' ', '_')
-    filename = filename.replace('/', '__')
     write_json_to_file(board, 'dashboards', filename)
   if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
     git_commit_push()
 
+def string_to_filename(filename):
+    filename = filename.replace(' ', '_')
+    filename = filename.replace('/', '__')
+    return(filename)
 
 # Alerts
 def get_alert(id):
@@ -151,6 +157,16 @@ def api_request(path, data = ()):
   response = requests.request("GET", url, headers=headers)
   return json.loads(response.text)
 
+# Parsing Rules
+
+def get_parsing_rule_groups():
+  rule_groups = api_request('/mgmt/openapi/api/v1/rulegroups');
+  write_json_to_file(rule_groups, 'parsing-rules', 'groups.json')
+  return(rule_groups);
+
+
+
+# Utils
 def _grpcurl(location, data = ()):
 
   command = [
