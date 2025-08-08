@@ -12,6 +12,7 @@ import subprocess
 import json
 import logging
 import datetime
+import requests
 
 from dotenv import load_dotenv
 
@@ -60,9 +61,18 @@ grpc_endpoints = {
   "US1": "ng-api-grpc.coralogix.us:443",
   "US2": "ng-api-grpc.cx498.coralogix.com:443",
 }
-
 grpc_endpoint = grpc_endpoints[region]
 
+http_endpoints = {
+  "AP1": "https://api.ap1.coralogix.in",
+  "AP2": "https://api.ap2.coralogixsg.com",
+  "AP3": "https://api.ap3.coralogix.com",
+  "EU1": "https://api.coralogix.com",
+  "EU2": "https://api.eu2.coralogix.com",
+  "US1": "https://api.coralogix.us",
+  "US2": "https://api.cx498.coralogix.com",
+}
+http_endpoint = http_endpoints[region]
 write_files = 1
 
 def main():
@@ -76,46 +86,61 @@ def main():
   os.chdir(workdir)
 
   alerts_defs = get_alerts_definitions();
-  for alertdef in alerts_defs['alertDefs']:
-    alert = get_and_save_alert(alertdef['id'])
-    filename = alertdef['id'] + '::' + alertdef['alertDefProperties']['name'] + '.json'
-    filename = filename.replace(' ', '_')
-    write_json_to_file(alert, 'alerts', filename)
+  if 'alertDefs' in alerts_defs:
+    for alertdef in alerts_defs['alertDefs']:
+      alert = get_alert(alertdef['id'])
+      filename = alertdef['id'] + '::' + alertdef['alertDefProperties']['name'] + '.json'
+      filename = filename.replace(' ', '_')
+      filename = filename.replace('/', '__')
+      write_json_to_file(alert, 'alerts', filename)
+  else:
+    logging.info("No alerts found")
+
 
   db_catalog = get_dashboard_catalog();
   for dashboard_id in db_catalog:
-    board = get_and_save_dashboard(dashboard_id)
+    board = get_dashboard(dashboard_id)
     filename = board["dashboard"]["id"] + '::' + board["dashboard"]["name"] + '.json'
     filename = filename.replace(' ', '_')
+    filename = filename.replace('/', '__')
     write_json_to_file(board, 'dashboards', filename)
-
   if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
     git_commit_push()
 
-def get_and_save_alert(id):
-  payload = ({"id": id})
-  alert = grpcurl('com.coralogixapis.alerts.v3.AlertDefsService/GetAlertDef', payload)
+
+# Alerts
+def get_alert(id):
+  alert = api_request(f"/mgmt/openapi/v3/alert-defs/{id}")
   return alert
 
 def get_alerts_definitions():
-  definitions = grpcurl("com.coralogixapis.alerts.v3.AlertDefsService/ListAlertDefs")
+  definitions = api_request('/mgmt/openapi/v3/alert-defs?')
   write_json_to_file(definitions, 'alerts', 'definitions.json')
   return(definitions)
 
-def get_and_save_dashboard(id):
-  payload = ({"dashboard_id": id})
-  board = grpcurl("com.coralogixapis.dashboards.v1.services.DashboardsService/GetDashboard", payload)
+# Dashboards
+def get_dashboard(id):
+  board = api_request(f"/mgmt/openapi/v1/dashboards/dashboards/{id}")
   return board
 
 def get_dashboard_catalog():
-  catalog = grpcurl("com.coralogixapis.dashboards.v1.services.DashboardCatalogService/GetDashboardCatalog")
+  catalog = api_request('/mgmt/openapi/v1/dashboards/catalog')
   write_json_to_file(catalog, 'dashboards', 'catalog.json')
   boards = {}
   for item in catalog["items"]:
     boards[ item['id'] ] = item['name']
   return boards
 
-def grpcurl(location, data = ()):
+
+def api_request(path, data = ()):
+  url = http_endpoint + path
+  logging.debug('Key: ' + api_key)
+  logging.debug(f"Hitting {url}")
+  headers = {"Authorization": "Bearer " + api_key}
+  response = requests.request("GET", url, headers=headers)
+  return json.loads(response.text)
+
+def _grpcurl(location, data = ()):
 
   command = [
     'grpcurl',
