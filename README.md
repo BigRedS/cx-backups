@@ -39,9 +39,9 @@ With the right config, instead of creating and working in a `./cx-backups.d` dir
 
 # Installation and running
 
-All you should need to do to get this working is:
+On something Debian based you need `sudo apt-get install python3 python3-requests python3-yaml python3-json`, on anything else try
 
-    apt-get install python3 grpcurl
+On anything else, get Python installed and do `pip install -r requirements.txt`
 
 There are no supported arguments; everything is set via environment veriables:
 
