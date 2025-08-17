@@ -13,6 +13,7 @@ import json
 import logging
 import datetime
 import requests
+import yaml
 
 from dotenv import load_dotenv
 
@@ -98,26 +99,40 @@ def main():
   if 'alertDefs' in alerts_defs:
     for alertdef in alerts_defs['alertDefs']:
       alert = get_alert(alertdef['id'])
-      filename = alertdef['id'] + '::' + alertdef['alertDefProperties']['name'] + '.json'
-      filename = filename.replace(' ', '_')
-      filename = filename.replace('/', '__')
+      filename = alertdef['id'] + '::' + alertdef['alertDefProperties']['name']
+
       write_json_to_file(alert, 'alerts', filename)
   else:
     logging.info("No alerts found")
 
+  catalog = get_dashboard_catalog();
+  db_folders = catalog['folders']
+  db_catalog = catalog['dashboards']
 
-  db_catalog = get_dashboard_catalog();
+  dashboard_summaries = {}
   for dashboard_id in db_catalog:
     board = get_dashboard(dashboard_id)
-    filename = board["dashboard"]["id"] + '::' + board["dashboard"]["name"] + '.json'
+
+    summary = summarise_board(board)
+    #TODO: Recreate whole hierarchy of folders and subfolder
+    if 'folderId' in board['dashboard']:
+      folder_id = board['dashboard']['folderId']['value']
+      folder_name = db_folders[ folder_id ]['name']
+      if not folder_name in dashboard_summaries:
+        dashboard_summaries[ folder_name ] = []
+      dashboard_summaries[ folder_name ].append(summary)
+    else:
+      if not '_root_folder' in dashboard_summaries:
+        dashboard_summaries[ '_root_folder'] = []
+      dashboard_summaries['_root_folder'].append(summary)
+
+    filename = board["dashboard"]["id"] + '::' + board["dashboard"]["name"]
     write_json_to_file(board, 'dashboards', filename)
+
+    write_yaml_to_file(dashboard_summaries, 'dashboards', 'dashboards')
+
   if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
     git_commit_push()
-
-def string_to_filename(filename):
-    filename = filename.replace(' ', '_')
-    filename = filename.replace('/', '__')
-    return(filename)
 
 # Alerts
 def get_alert(id):
@@ -126,7 +141,7 @@ def get_alert(id):
 
 def get_alerts_definitions():
   definitions = api_request('/mgmt/openapi/v3/alert-defs?')
-  write_json_to_file(definitions, 'alerts', 'definitions.json')
+  write_json_to_file(definitions, 'alerts', 'definitions')
   return(definitions)
 
 # Dashboards
@@ -136,11 +151,86 @@ def get_dashboard(id):
 
 def get_dashboard_catalog():
   catalog = api_request('/mgmt/openapi/v1/dashboards/catalog')
-  write_json_to_file(catalog, 'dashboards', 'catalog.json')
+  write_json_to_file(catalog, 'dashboards', 'catalog')
+
   boards = {}
+  folders = {}
   for item in catalog["items"]:
     boards[ item['id'] ] = item['name']
-  return boards
+    if 'folder' in item and item['folder'] is not None:
+      folders[ item['folder']['id'] ] = item['folder']
+
+  catalog = { "dashboards": boards, "folders": folders}
+  return catalog
+
+def summarise_board(dashboard):
+  summary = {
+    "name": dashboard['dashboard']['name'],
+    "description": dashboard['dashboard']['description'],
+    "sections": []
+  }
+  for section in dashboard['dashboard']['layout']['sections']:
+    s = {}
+    if not section is None and 'options' in section and not section['options'] is None and 'custom' in section['options'] and 'name' in section['options']['custom']:
+      s['name'] = section['options']['custom']['name']
+    if not section is None and 'options' in section and not section['options'] is None and 'custom' in section['options'] and 'description' in section['options']['custom'] and section['options']['custom']['description'] != 'null':
+      s['description'] = section['options']['custom']['description']
+
+    s['rows'] = []
+    s['kind'] = 'section'
+    if 'rows' in section:
+      for row in section['rows']:
+        r = {}
+        r['widgets'] = []
+        r['kind'] = 'row'
+        if 'widgets' in row:
+          for widget in row['widgets']:
+            w = {}
+            w['kind'] = 'widget'
+            w['queries'] = []
+            w['title'] = widget['title']
+            # There will only be one 'kind' in any given 'widget', but we do a
+            # for here rather than needing a list of possible values for it
+            for kind in widget['definition']:
+              w['type'] = kind
+              if 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_HIGH_UNSPECIFIED":
+                w['tier'] = 'frequentsearch'
+              if 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_ARCHIVE":
+                w['tier'] = 'archive'
+              query_definitions = []
+
+              # Widget types that can have multiple queries (lines, for instance) have a list
+              # of query definitions under the key 'queryDefinitions', but those types that can
+              # only have one (pie charts) just have a single definition under the key 'query'.
+              # Here we normalise those
+              if 'queryDefinitions' in widget['definition'][kind]:
+                for query in widget['definition'][kind]['queryDefinitions']:
+                  query_definitions.append( query )
+
+              if 'query' in widget['definition'][kind]:
+                query_definitions.append( widget['definition'][kind]['query'] )
+
+                for queryDef in query_definitions:
+                  q = {}
+                  for lang in queryDef:
+                    if lang == 'dataprime':
+                      q['query_language'] = 'dataprime'
+                      q['query'] = queryDef['dataprime']['dataprimeQuery']['text']
+                      w['queries'].append(q)
+                    elif lang =='metrics':
+                      q['query_language'] = 'promql'
+                      q['query'] = queryDef['metrics']['promqlQuery']['value']
+                    elif lang == 'logs':
+                      q['query_language'] = 'lucene'
+                      q['query'] = queryDef['logs']['luceneQuery']['value']
+                    else:
+                      logging.error(f"Found unknown query language '{lang}' in dashboard '{dashboard['dashboard']['name']}'")
+                      q['error'] = f"Unknown language '{lang}'"
+                  w['queries'].append(q)
+            r['widgets'].append(w)
+        s['rows'].append(r)
+    summary['sections'].append(s)
+  return summary
 
 # E2M
 def get_e2ms():
@@ -148,9 +238,7 @@ def get_e2ms():
   if 'e2m' in list:
     for e2m in list['e2m']:
       filename = '::'.join([str(e2m['id']), e2m['name']])
-      filename = filename + '.json'
       write_json_to_file(list, 'events2metrics', filename)
-  print(json.dumps(list, indent=2))
 
 
 def api_request(path, data = ()):
@@ -168,7 +256,6 @@ def get_parsing_rule_groups():
   if 'ruleGroups' in rule_groups:
     for rule_group in rule_groups['ruleGroups']:
       filename = '::'.join([str(rule_group['order']), rule_group['id'], rule_group['name']])
-      filename = filename + '.json'
       write_json_to_file(rule_groups, 'parsing-rules', filename )
   return(rule_groups);
 
@@ -215,10 +302,34 @@ def write_json_to_file(data, type, filename, subdir=''):
   if not os.path.exists(dirpath):
     os.makedirs(dirpath)
 
-  filepath = dirpath + '/' + filename
+  filename = filename.replace(' ', '_')
+  filename = filename.replace('/', '__')
+
+  filepath = dirpath + '/' + filename + '.json'
 
   with open(filepath, 'w', encoding='utf-8') as f:
     json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def write_yaml_to_file(data, type, filename, subdir=''):
+
+  if write_files == 0:
+    return
+  if len(subdir) > 0:
+    dirpath = save_dirs[type] + '/' + subdir
+  else:
+    dirpath = save_dirs[type]
+
+  if not os.path.exists(dirpath):
+    os.makedirs(dirpath)
+
+  filename = filename.replace(' ', '_')
+  filename = filename.replace('/', '__')
+
+  filepath = dirpath + '/' + filename + '.yaml'
+
+  with open(filepath, 'w', encoding='utf-8') as f:
+    yaml.dump(data, f, indent=2, sort_keys=True)
 
 # Git shennanigans
 # TODO: Any error handling at all would be nice!
