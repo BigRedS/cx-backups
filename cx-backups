@@ -9,6 +9,7 @@ import logging
 import os
 import datetime
 import requests
+import subprocess
 import json
 import yaml
 
@@ -33,12 +34,17 @@ if "CX_REGION" in os.environ:
 if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
   git_repo_url = os.environ['CX_BACKUPS_GIT_REPO_URL']
 
+workdir = './'
 if 'CX_BACKUPS_WORKDIR' in os.environ:
   workdir = os.environ['CX_BACKUPS_WORKDIR']
 elif 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
   workdir = '/tmp/cx-backups/'
 else:
   workdir = './cx-backups.d/'
+
+subdir = './'
+if 'CX_BACKUPS_SUBDIR' in os.environ:
+  subdir = os.environ['CX_BACKUPS_']
 
 if 'CX_BACKUPS_GIT_COMMIT_MESSAGE' in os.environ:
   git_commit_message = os.environ['CX_BACKUPS_GIT_COMMIT_MESSAGE']
@@ -74,6 +80,13 @@ def main():
     os.makedirs(workdir)
   os.chdir(workdir)
 
+  if 'CX_BACKUPS_DO_GIT' in os.environ and not os.path.exists('.git'):
+    git_init()
+
+  if not os.path.exists(subdir):
+    os.makedirs(subdir)
+  workdir_fullpath = os.getcwd()
+  os.chdir(subdir)
 
   # I don't yet have anything useful to do with the list of e2ms or parsing rules, and since the
   # get_* functions do the writing to disk themselves, these just sit there on their own.
@@ -109,10 +122,14 @@ def main():
       dashboard_summaries['_root_folder'].append(summary)
     filename = board["dashboard"]["name"] + '::' + board["dashboard"]["id"]
     write_json_to_file(board, 'dashboards', filename)
-    write_yaml_to_file(dashboard_summaries, 'dashboards', 'dashboards')
+    write_yaml_to_file(dashboard_summaries, '', 'dashboards')
+
+  os.chdir(workdir_fullpath)
+  if 'CX_BACKUPS_DO_GIT' in os.environ:
+    git_commit()
 
   if 'CX_BACKUPS_GIT_REPO_URL' in os.environ:
-    git_commit_push()
+    git_push()
 
 # Alerts
 def get_alert(id):
@@ -121,7 +138,7 @@ def get_alert(id):
 
 def get_alerts_definitions():
   definitions = api_request('/mgmt/openapi/v3/alert-defs?')
-  write_json_to_file(definitions, 'alerts', 'definitions')
+  write_json_to_file(definitions, 'alerts', 'alert-definitions')
   return(definitions)
 
 
@@ -132,7 +149,7 @@ def get_dashboard(id):
 
 def get_dashboard_catalog():
   catalog = api_request('/mgmt/openapi/v1/dashboards/catalog')
-  write_json_to_file(catalog, 'dashboards', 'catalog')
+  write_json_to_file(catalog, '', 'dashboard-catalog')
   boards = {}
   folders = {}
   for item in catalog["items"]:
@@ -174,8 +191,10 @@ def summarise_board(dashboard):
               w['type'] = kind
               if 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_HIGH_UNSPECIFIED":
                 w['tier'] = 'frequentsearch'
-              if 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_ARCHIVE":
+              elif 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_ARCHIVE":
                 w['tier'] = 'archive'
+              else:
+                w['tier'] = 'archive?'
               query_definitions = []
 
               # Widget types that can have multiple queries (lines, for instance) have a list
@@ -294,9 +313,14 @@ def git_clone():
     shutil.rmtree(workdir)
   subprocess.run(['git', 'clone', git_repo_url, workdir])
 
-def git_commit_push():
+def git_commit():
   subprocess.run(['git', 'add', '.'])
   subprocess.run(['git', 'commit', '-a', '-m', git_commit_message ])
+
+def git_push():
   subprocess.run(['git', 'push'])
+
+def git_init():
+  subprocess.run(['git', 'init'])
 
 main()
