@@ -2,40 +2,56 @@
 
 A quick-and-dirty script to toy with the idea of 'offsite backups' of Coralogix configs.
 
-Run most-simply, will download all your dashboards and alerts to local files. A `cx-backups.d` directory will be created and inside there two more: `alerts` and `dashboards`.
+Run most-simply, will download all your dashboards and alerts to local files. A `cx-backups.d` directory will be created and inside there one more for each thing backed up - `alerts`, `dashboards`, `events2metrics` and `parsing-rules`.
 
-In the dashboards directory, a JSON file will be written for each dashboard containing its definition, named `<dashboard-id>::<dashboard_name>`, plus one called `catalog.json` that records which boards go in which folders.
+Each of these will contain one JSON file per thing-backed-up; one for each alert, dashboard, e2m rule and parsing-rule group.
 
-In the alerts directory, a JSON file will be written for each alert containing its definition, named `<alert-id>::<alert-name>` plus one called `definitions.json` that contains all of them in one file. as returned by the API.
+Additionally, a `dashboards.yaml` will be written, which attempts to describe the dashboards, and the `dashboard-catalog.json` and `alert-definitions.json` as returned from the API:
 
-    find cx-backups.d/
-    cx-backups.d/
-    cx-backups.d/dashboards
-    cx-backups.d/dashboards/F8w9eoxtIhtMJI44oBt6F::Mapping_Exceptions.json
-    x-backups.d/dashboards/icErszlxXE7ttjqwu-tH_::Data_Usage.json
-    cx-backups.d/dashboards/QAI_WrV6Lg09vUr7Na7ha::Logs_Overview.json
-    cx-backups.d/dashboards/5QHVm6qhAjZk-mePVuIJQ::Logs_Classification.json
-    cx-backups.d/dashboards/catalog.json
-    cx-backups.d/dashboards/ZerJr6dDM1tJ4JMIgoY1V::Host_Dashboard.json
-    cx-backups.d/dashboards/sTdBFCGXxLo755E7QzeEg::Kubernetes_Complete_Observability_-_Coralogix_Helmchart_Supported.json
-    cx-backups.d/alerts
-    cx-backups.d/alerts/dea85261-2572-472a-9ad0-a0c82cd9db29::K8s_-_Pod_Scheduling_Failure.json
-    cx-backups.d/alerts/199f203c-94be-44d3-96db-febc8718101e::K8s_-_Pod_Failure_Detected.json
-    cx-backups.d/alerts/adfbab76-5f47-4f1d-b862-fe0f8dcf7a61::K8s_-_Percentage_of_Healthy_Pods_Below_44%.json
-    cx-backups.d/alerts/d8da10d6-22fc-4042-9a51-d44bd5d390c3::K8s_-_Node_Memory_Utilization_Higher_Than_80%.json
-    cx-backups.d/alerts/10d1f9e9-b499-47a2-bfa2-b25f12bf6327::K8s_-_Node_CPU_Utilization_Above_80%.json
-    cx-backups.d/alerts/3a3a3616-cca6-49f4-8acb-2dc842dcd57a::K8s_-_DaemonSet_MisScheduled_Pods_-_All_namespace.json
-    cx-backups.d/alerts/b59193a0-90f0-49fa-99ae-d2a2b5799f37::K8s_-_Volume_Mount_Failure.json
-    cx-backups.d/alerts/28d603e7-f2d5-44ef-845d-a43c23e0d33a::K8s_-_Node_Approaching_Out_of_Memory_(Oom).json
-    cx-backups.d/alerts/definitions.json
+```
+$ ls
+alerts  dashboard-catalog.json  dashboards  dashboards.yaml  events2metrics  parsing-rules
+$ ls dashboards | head
+Data_Usage::icErszlxXE7ttjqwu-tH_.json
+Host_Dashboard::ZerJr6dDM1tJ4JMIgoY1V.json
+Kubernetes_Complete_Observability_-_Coralogix_Helmchart_Supported::sTdBFCGXxLo755E7QzeEg.json
+Kubernetes_Dashboard_-_Legacy_-_KSM,_cAdvisor,nodemetrics_Supported::cqfOPaj0KXtvb3oUQtMa8.json
+Logs_Classification::5QHVm6qhAjZk-mePVuIJQ.json
+Logs_Overview::QAI_WrV6Lg09vUr7Na7ha.json
+Long_Term_Trends::WrC5CKE8Td0YgajwHK10f.json
+Mapping_Exceptions::F8w9eoxtIhtMJI44oBt6F.json
+Storage_Pi::jEv2PulBFLW2QCOUlJP41.json
+broken_test::4cunUCamVxgCPobCUmK78.json
+```
 
-Automated restoration is not attempted here; the idea is you could refer back to these, perhaps import a dashboard json export if you want, and/or use any of these when building out Terraform configs. The JSON docs are as exported by the UI, and as exported and as expected by the APIs.
+I've not yet needed it, so there isn't currently a cx-restore tool :D
 
-I expect to export more types of coralogix thing (e2m configs, parsing rules etc.) as and when it becomes useful to me. Half the point of this script is to show you how easy it is to write your own, but feel free to ask if you'd like to wait for me to do it :D
+# Git version-tracking
 
-# Version-tracking
+This script can clone a git repo, dump the data into that, commit the changes and push them up. This is is intended to be run as a periodic job so as to be able to track changes - see when that value was set, or what that was set to six weeks ago or something.
 
-With the right config, instead of creating and working in a `./cx-backups.d` directory, the script can clone a git repo, dump the data into that, commit the changes and push them up. This is is intended to be run as a periodic job so as to be able to track changes - see when that value was set, or what that was set to six weeks ago or something.
+Here, I can see that I changed one of the widgets on my Long Term Trends dashboard to use the archive, not frequent-search:
+
+```
+$ git diff --unified=0 HEAD~1
+diff --git a/dashboard-catalog.json b/dashboard-catalog.json
+index 15c4715..6f6db3e 100644
+--- a/dashboard-catalog.json
++++ b/dashboard-catalog.json
+@@ -111 +111 @@
+-      "updateTime": "2025-08-19T09:56:19.109937Z"
++      "updateTime": "2025-08-19T09:58:37.082889Z"
+diff --git a/dashboards/Long_Term_Trends::WrC5CKE8Td0YgajwHK10f.json b/dashboards/Long_Term_Trends::WrC5CKE8Td0YgajwHK10f.json
+index f82841e..a4baf3f 100644
+--- a/dashboards/Long_Term_Trends::WrC5CKE8Td0YgajwHK10f.json
++++ b/dashboards/Long_Term_Trends::WrC5CKE8Td0YgajwHK10f.json
+@@ -45 +45 @@
+-                          "dataModeType": "DATA_MODE_TYPE_HIGH_UNSPECIFIED",
++                          "dataModeType": "DATA_MODE_TYPE_ARCHIVE",
+@@ -147 +147 @@
+-  "updatedAt": "2025-08-19T09:56:19.109937Z",
++  "updatedAt": "2025-08-19T09:58:37.082889Z",
+```
 
 # Installation and running
 
