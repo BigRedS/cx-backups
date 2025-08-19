@@ -188,13 +188,6 @@ def summarise_board(dashboard):
             # There will only be one 'kind' in any given 'widget', but we do a
             # for here rather than needing a list of possible values for it
             for kind in widget['definition']:
-              w['type'] = kind
-              if 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_HIGH_UNSPECIFIED":
-                w['tier'] = 'frequentsearch'
-              elif 'dataModeType' in widget['definition'] and widget['definition']['dataModeType'] == "DATA_MODE_TYPE_ARCHIVE":
-                w['tier'] = 'archive'
-              else:
-                w['tier'] = 'archive?'
               query_definitions = []
 
               # Widget types that can have multiple queries (lines, for instance) have a list
@@ -206,41 +199,32 @@ def summarise_board(dashboard):
                   query_definitions.append( query )
 
               if 'query' in widget['definition'][kind]:
-                query_definitions.append( widget['definition'][kind]['query'] )
-
+                query_definitions.append( widget['definition'][kind])
                 for queryDef in query_definitions:
                   q = {}
-                  for lang in queryDef:
+                  if 'dataModeType' in queryDef:
+                    if queryDef['dataModeType'] == 'DATA_MODE_TYPE_ARCHIVE':
+                      q['tier'] = 'archive'
+                    elif queryDef['dataModeType'] == 'DATA_MODE_TYPE_HIGH_UNSPECIFIED':
+                      q['tier'] = 'frequentsearch'
+                    else:
+                      q['tier'] = 'unknown: ' + queryDef[lang]['dataModeType']
+                  else:
+                    q['tier'] = ''
+                  for lang in queryDef['query']:
                     if lang == 'dataprime':
                       q['query_language'] = 'dataprime'
-                      q['query'] = queryDef['dataprime']['dataprimeQuery']['text']
-                      if 'dataModeType' in queryDef['dataprime']:
-                        if queryDef['dataprime']['dataModeType'] == 'DATA_MODE_TYPE_ARCHIVE':
-                          q['tier'] = 'archive'
-                        else:
-                          q['tier'] = 'unknown: ' + queryDef['dataprime']['dataModeType']
-                      else:
-                        q['tier'] = 'frequentsearch'
-                      w['queries'].append(q)
+                      q['query'] = queryDef['query']['dataprime']['dataprimeQuery']['text']
                     elif lang =='metrics':
                       q['query_language'] = 'promql'
-                      q['query'] = queryDef['metrics']['promqlQuery']['value']
-                      w['queries'].append(q)
+                      q['query'] = queryDef['query']['metrics']['promqlQuery']['value']
                     elif lang == 'logs':
                       q['query_language'] = 'lucene'
                       #TODO: Actually learn Python and come back and not do this:
-                      if 'luceneQuery' in queryDef['logs'] and queryDef['logs']['luceneQuery'] is not None and 'value' in queryDef['logs']['luceneQuery']:
-                        q['query'] = queryDef['logs']['luceneQuery']['value']
+                      if 'luceneQuery' in queryDef['query']['logs'] and queryDef['query']['logs']['luceneQuery'] is not None and 'value' in queryDef['query']['logs']['luceneQuery']:
+                        q['query'] = queryDef['query']['logs']['luceneQuery']['value']
                       else:
                         q['query'] = ''
-                      if 'dataModeType' in queryDef['logs']:
-                        if queryDef['lucene']['dataModeType'] == 'DATA_MODE_TYPE_ARCHIVE':
-                          q['tier'] = 'archive'
-                        else:
-                          q['tier'] = 'unknown: ' + queryDef['lucene']['dataModeType']
-                      else:
-                        q['tier'] = 'frequentsearch'
-                      w['queries'].append(q)
                     else:
                       logging.error(f"Found unknown query language '{lang}' in dashboard '{dashboard['dashboard']['name']}'")
                       q['error'] = f"Unknown language '{lang}'"
