@@ -138,7 +138,7 @@ def get_alert(id):
 
 def get_alerts_definitions():
   definitions = api_request('/mgmt/openapi/v3/alert-defs?')
-  write_json_to_file(definitions, 'alerts', 'alert-definitions')
+  write_json_to_file(definitions, '', 'alert-definitions')
   return(definitions)
 
 
